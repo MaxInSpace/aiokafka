@@ -282,6 +282,12 @@ class LegacyRecordBatchBuilder(LegacyRecordBase):
         self._batch_size = batch_size
         self._buffer = bytearray()
 
+    def has_room_for(self, offset, key, value):
+        pos = len(self._buffer)
+        size = self.size_in_bytes(key, value)
+        # We always allow at least one record to be appended
+        return offset == 0 or pos + size <= self._batch_size
+
     def append(self, offset, timestamp, key, value):
         """ Append message to batch.
         """
@@ -302,11 +308,11 @@ class LegacyRecordBatchBuilder(LegacyRecordBase):
                 "Not supported type for value: {}".format(type(value)))
 
         # Check if we have room for another message
-        pos = len(self._buffer)
-        size = self.size_in_bytes(offset, timestamp, key, value)
-        # We always allow at least one record to be appended
-        if offset != 0 and pos + size >= self._batch_size:
+        if not self.has_room_for(offset, key, value):
             return None, 0
+
+        pos = len(self._buffer)
+        size = self.size_in_bytes(key, value)
 
         # Allocate proper buffer length
         self._buffer.extend(bytearray(size))
@@ -376,8 +382,7 @@ class LegacyRecordBatchBuilder(LegacyRecordBase):
                     compressed = lz4_encode_old_kafka(bytes(self._buffer))
                 else:
                     compressed = lz4_encode(bytes(self._buffer))
-            size = self.size_in_bytes(
-                0, timestamp=0, key=None, value=compressed)
+            size = self.size_in_bytes(key=None, value=compressed)
             if size > len(self._buffer):
                 self._buffer = bytearray(size)
             else:
@@ -401,7 +406,7 @@ class LegacyRecordBatchBuilder(LegacyRecordBase):
 
     # Size calculations. Just copied Java's implementation
 
-    def size_in_bytes(self, offset, timestamp, key, value, headers=None):
+    def size_in_bytes(self, key, value, headers=None):
         """ Actual size of message to add
         """
         assert not headers, "Headers not supported in v0/v1"

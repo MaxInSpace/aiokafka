@@ -21,6 +21,9 @@ class BatchBuilder:
         self._relative_offset = 0
         self._closed = False
 
+    def has_room_for(self, key, value):
+        return self._builder.has_room_for(self._relative_offset, key, value)
+
     def append(self, *, timestamp, key, value):
         if self._closed:
             return 0
@@ -31,8 +34,8 @@ class BatchBuilder:
         # Check if we could add the message
         if actual_size == 0:
             return 0
-
         self._relative_offset += 1
+
         return actual_size
 
     def _build(self):
@@ -53,12 +56,14 @@ class MessageBatch:
         self._loop = loop
         self._ttl = ttl
         self._ctime = loop.time()
+        self._buffer = None
 
         # Waiters
         # Set when messages are delivered to Kafka based on ACK setting
         self._msg_futures = []
-        # Set when sender takes this batch
-        self._drain_waiter = create_future(loop=loop)
+
+    def has_room_for(self, key, value):
+        return self._builder.has_room_for(key, value)
 
     def append(self, key, value, timestamp_ms):
         """Append message (key and value) to batch
@@ -95,18 +100,13 @@ class MessageBatch:
         """Wait until all message from this batch is processed"""
         return asyncio.wait(self._msg_futures, loop=self._loop)
 
-    def wait_drain(self):
-        """Wait until all message from this batch is processed"""
-        return self._drain_waiter
-
     def expired(self):
         """Check that batch is expired or not"""
         return (self._loop.time() - self._ctime) > self._ttl
 
     def drain_ready(self):
         """Compress batch to be ready for send"""
-        if not self._drain_waiter.done():
-            self._drain_waiter.set_result(None)
+        if self._buffer is None:
             self._buffer = self._builder._build()
 
     def get_data_buffer(self):
@@ -131,6 +131,8 @@ class MessageAccumulator:
         self._closed = False
         self._api_version = (0, 9)
 
+        self._message_queue = collections.defaultdict(collections.deque)
+
     def set_api_version(self, api_version):
         self._api_version = api_version
 
@@ -146,19 +148,11 @@ class MessageAccumulator:
         self._closed = True
         yield from self.flush()
 
-    @asyncio.coroutine
-    def add_message(self, tp, key, value, timeout, timestamp_ms=None):
-        """ Add message to batch by topic-partition
-        If batch is already full this method waits (`timeout` seconds maximum)
-        until batch is drained by send task
-        """
-        if self._closed:
-            # this can happen when producer is closing but try to send some
-            # messages in async task
-            raise ProducerClosed()
-
+    def _get_next_batch(self, tp, key, value):
+        """Get a batch for a topic-partition or return None if unable to"""
         pending_batches = self._batches.get(tp)
         if not pending_batches:
+            # no pending batches, we can safely assume that we can send
             magic = 0 if self._api_version < (0, 10) else 1
             builder = BatchBuilder(
                 magic, self._batch_size, self._compression_type
@@ -170,21 +164,77 @@ class MessageAccumulator:
             if not self._wait_data_future.done():
                 # Wakeup sender task if it waits for data
                 self._wait_data_future.set_result(None)
+            return batch
         else:
             batch = pending_batches[-1]
+            if batch.has_room_for(key, value):
+                return batch
+        return None
+
+    def _check_next_message(self, tp):
+        mq = self._message_queue.get(tp)
+        if not mq:
+            return
+        fut, key, value = mq[0]
+        if fut.cancelled():
+            mq.popleft()
+            self._check_next_message(tp)
+            return
+        if fut.done():
+            return
+        batch = self._get_next_batch(tp, key, value)
+        if batch:
+            fut.set_result(None)
+
+    @asyncio.coroutine
+    def _wait_for_batch(self, tp, key, value, timeout):
+        """Get a batch for a topic-partition or wait until a one is ready"""
+        mq = self._message_queue[tp]
+        if not mq:
+            batch = self._get_next_batch(tp, key, value)
+            if batch is not None:
+                # we can return the next batch immediately if we have a
+                # batch present that can handle this key/value pair and
+                # we don't have a pending message queue
+                return batch
+
+        # We're waiting on a batch. This has a few implications:
+        # - We have to keep strict ordering at this point. Its possible to
+        #   have another message come in.
+        # - To ensure strict ordering, we'll have to keep a list.  Relying
+        #   on reentrant or multiple awaits can reorder this message.
+        # I'm not sure why this is necessary. It seems like batches should
+        # batch data into the _batches queue instead of relying on asyncio
+        # to coroutine ourselves out of this problem. We may want to revisit
+        # this solution to see if there's a better way to do this.
+        fut = create_future(loop=self._loop)
+        mq.append((fut, key, value))
+        done, _ = yield from asyncio.wait([fut], timeout=timeout,
+            loop=self._loop)
+        if not done:
+            fut.cancel()
+            raise KafkaTimeoutError()
+        mq.popleft()
+        batch = self._get_next_batch(tp, key, value)
+        assert(batch is not None)
+        return batch
+
+    @asyncio.coroutine
+    def add_message(self, tp, key, value, timeout, timestamp_ms=None):
+        """ Add message to batch by topic-partition
+        If batch is already full this method waits (`timeout` seconds maximum)
+        until batch is drained by send task
+        """
+        batch = yield from self._wait_for_batch(tp, key, value, timeout)
+
+        if self._closed:
+            # this can happen when producer is closing but try to send some
+            # messages in async task
+            raise ProducerClosed()
 
         future = batch.append(key, value, timestamp_ms)
-        if future is None:
-            # Batch is full, can't append data atm,
-            # waiting until batch per topic-partition is drained
-            start = self._loop.time()
-            yield from asyncio.wait(
-                [batch.wait_drain()], timeout=timeout, loop=self._loop)
-            timeout -= self._loop.time() - start
-            if timeout <= 0:
-                raise KafkaTimeoutError()
-            return (yield from self.add_message(
-                tp, key, value, timeout, timestamp_ms))
+        assert(future is not None)
+        self._check_next_message(tp)
         return future
 
     def data_waiter(self):
@@ -198,6 +248,7 @@ class MessageAccumulator:
         batch.drain_ready()
         if len(self._batches[tp]) == 0:
             del self._batches[tp]
+            self._check_next_message(tp)
         return batch
 
     def reenqueue(self, batch):

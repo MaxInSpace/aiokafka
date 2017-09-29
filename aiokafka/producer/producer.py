@@ -291,7 +291,8 @@ class AIOKafkaProducer(object):
             'Need at least one: key or value'
 
         # first make sure the metadata for the topic is available
-        yield from self.client._wait_on_metadata(topic)
+        if not self.client.partitions_exist_for_topic(topic):
+            yield from self.client._wait_on_metadata(topic)
 
         key_bytes, value_bytes = self._serialize(topic, key, value)
         partition = self._partition(topic, partition, key, value,
