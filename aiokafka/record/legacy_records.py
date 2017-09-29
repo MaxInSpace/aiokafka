@@ -292,6 +292,12 @@ class _LegacyRecordBatchBuilderPy(LegacyRecordBase):
         self._msg_buffers = []
         self._pos = 0
 
+    def has_room_for(self, offset, key, value):
+        pos = len(self._buffer)
+        size = self.size_in_bytes(key, value)
+        # We always allow at least one record to be appended
+        return offset == 0 or pos + size <= self._batch_size
+
     def append(self, offset, timestamp, key, value):
         """ Append message to batch.
         """
@@ -299,6 +305,20 @@ class _LegacyRecordBatchBuilderPy(LegacyRecordBase):
             timestamp = -1
         elif timestamp is None:
             timestamp = int(time.time() * 1000)
+        elif type(timestamp) != int:
+            raise TypeError(timestamp)
+        if not (key is None or
+                isinstance(key, (bytes, bytearray, memoryview))):
+            raise TypeError(
+                "Not supported type for key: {}".format(type(key)))
+        if not (value is None or
+                isinstance(value, (bytes, bytearray, memoryview))):
+            raise TypeError(
+                "Not supported type for value: {}".format(type(value)))
+
+        # Check if we have room for another message
+        if not self.has_room_for(offset, key, value):
+            return None, 0
 
         # calculating length is not cheap; only do it once
         key_size = len(key) if key is not None else 0
@@ -418,7 +438,7 @@ class _LegacyRecordBatchBuilderPy(LegacyRecordBase):
         """
         return self._pos
 
-    def size_in_bytes(self, offset, timestamp, key, value, headers=None):
+    def size_in_bytes(self, key, value, headers=None):
         """ Actual size of message to add
         """
         assert not headers, "Headers not supported in v0/v1"

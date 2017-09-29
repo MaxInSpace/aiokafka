@@ -20,7 +20,6 @@ from aiokafka.errors import (
     UnrecognizedBrokerVersion)
 from aiokafka.util import ensure_future, create_future
 
-
 __all__ = ['AIOKafkaClient']
 
 
@@ -235,6 +234,15 @@ class AIOKafkaClient:
             topics = None
         metadata_request = MetadataRequest[version_id](topics)
         nodeids = [b.nodeId for b in self.cluster.brokers()]
+        if not nodeids:
+            log.debug('bootstrapping because no valid nodes')
+            try:
+                yield from self.bootstrap()
+            except ConnectionError as e:
+                log.error('Unable to update metadata by bootstrapping')
+                cluster_metadata.failed_update(None)
+                return False
+
         bootstrap_id = ('bootstrap', ConnectionGroup.DEFAULT)
         if bootstrap_id in self._conns:
             nodeids.append('bootstrap')
@@ -513,6 +521,14 @@ class AIOKafkaClient:
         # We know that ApiVersionResponse is only supported in 0.10+
         # so if all else fails, choose that
         return (0, 10, 0)
+
+    def partitions_exist_for_topic(self, topic):
+        return topic in self.cluster._partitions
+
+    def partitions_for_topic(self, topic):
+        if topic in self.cluster.topics():
+            return self.cluster.partitions_for_topic(topic)
+        return None
 
     @asyncio.coroutine
     def _wait_on_metadata(self, topic):
