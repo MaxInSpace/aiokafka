@@ -199,7 +199,7 @@ class AIOKafkaClient:
                 loop=self._loop)
 
             topics = self._topics
-            if self._md_update_fut is None:
+            if self._md_update_fut is None or self._md_update_fut.done():
                 self._md_update_fut = create_future(loop=self._loop)
             ret = yield from self._metadata_update(self.cluster, topics)
             # If list of topics changed during metadata update we must update
@@ -284,7 +284,7 @@ class AIOKafkaClient:
         Returns:
             True/False - metadata updated or not
         """
-        if self._md_update_fut is None:
+        if self._md_update_fut is None or self._md_update_fut.done():
             # Wake up the `_md_synchronizer` task
             if not self._md_update_waiter.done():
                 self._md_update_waiter.set_result(None)
@@ -558,5 +558,7 @@ class AIOKafkaClient:
 
     @asyncio.coroutine
     def _maybe_wait_metadata(self):
-        if self._md_update_fut is not None:
+        if self._md_update_fut is None or self._md_update_fut.done():
+            self._md_update_fut = None
+        else:
             yield from self._md_update_fut
