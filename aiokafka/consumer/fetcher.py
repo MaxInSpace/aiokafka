@@ -104,7 +104,8 @@ class FetchResult:
             ret_list.append(msg)
             if max_records is not None and len(ret_list) >= max_records:
                 break
-        tp_assignment.position = ret_list[-1].offset + 1
+        if ret_list:
+            tp_assignment.position = ret_list[-1].offset + 1
         return ret_list
 
     def has_more(self):
