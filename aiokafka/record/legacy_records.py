@@ -292,11 +292,15 @@ class _LegacyRecordBatchBuilderPy(LegacyRecordBase):
         self._msg_buffers = []
         self._pos = 0
 
-    #def has_room_for(self, offset, key, value):
-    #    pos = len(self._buffer)
-    #    size = self.size_in_bytes(key, value)
+    def _has_room_for(self, offset, key_size, value_size):
+        size = self._size_in_bytes(key_size, value_size)
         # We always allow at least one record to be appended
-    #    return offset == 0 or pos + size <= self._batch_size
+        return offset == 0 or self._pos + size <= self._batch_size
+
+    def has_room_for(self, offset, key, value):
+        key_size = len(key) if key is not None else 0
+        value_size = len(value) if value is not None else 0
+        return self._has_room_for(offset, key_size, value_size)
 
     def append(self, offset, timestamp, key, value):
         """ Append message to batch.
@@ -316,20 +320,15 @@ class _LegacyRecordBatchBuilderPy(LegacyRecordBase):
             raise TypeError(
                 "Not supported type for value: {}".format(type(value)))
 
-        # Check if we have room for another message
-        #if not self.has_room_for(offset, key, value):
-        #    return None, 0
-
         # calculating length is not cheap; only do it once
         key_size = len(key) if key is not None else 0
         value_size = len(value) if value is not None else 0
 
-        pos = self._pos
-        size = self._size_in_bytes(key_size, value_size)
-
         # always allow at least one record to be appended
-        if offset != 0 and pos + size >= self._batch_size:
+        if not self._has_room_for(offset, key_size, value_size):
             return None
+
+        size = self._size_in_bytes(key_size, value_size)
 
         msg_buf = bytearray(size)
         try:

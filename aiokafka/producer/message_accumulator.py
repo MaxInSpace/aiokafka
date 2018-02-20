@@ -22,8 +22,8 @@ class BatchBuilder:
         self._buffer = None
         self._closed = False
 
-    #def has_room_for(self, key, value):
-    #    return self._builder.has_room_for(self._relative_offset, key, value)
+    def has_room_for(self, key, value):
+        return self._builder.has_room_for(self._relative_offset, key, value)
 
     def append(self, *, timestamp, key, value):
         """Add a message to the batch.
@@ -107,8 +107,8 @@ class MessageBatch:
         self.future = create_future(loop)
         self._msg_futures = []
 
-    #def has_room_for(self, key, value):
-    #    return self._builder.has_room_for(key, value)
+    def has_room_for(self, key, value):
+        return self._builder.has_room_for(key, value)
 
     def append(self, key, value, timestamp_ms, _create_future=create_future):
         """Append message (key and value) to batch
@@ -235,9 +235,8 @@ class MessageAccumulator:
             return self._append_batch(builder, tp)
         else:
             batch = pending_batches[-1]
-            #if batch.has_room_for(key, value):
-            #    return batch
-            return batch
+            if batch.has_room_for(key, value):
+                return batch
         return None
 
     def _check_next_message(self, tp):
@@ -302,7 +301,7 @@ class MessageAccumulator:
             raise ProducerClosed()
 
         future = batch.append(key, value, timestamp_ms)
-        #assert(future is not None)
+        assert(future is not None)
         self._check_next_message(tp)
         return future
 
