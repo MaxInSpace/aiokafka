@@ -164,6 +164,8 @@ class AIOKafkaConnection:
                                client_id=self._client_id)
         message = header.encode() + request.encode()
         size = self.HEADER.pack(len(message))
+        self.log.debug("%s Request %lu: %s expecting response %s",
+            self, correlation_id, request, request.RESPONSE_TYPE)
         try:
             self._writer.write(size + message)
         except OSError as err:
