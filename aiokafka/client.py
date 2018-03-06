@@ -66,7 +66,7 @@ class AIOKafkaClient:
             Default: None.
         connections_max_idle_ms (int): Close idle connections after the number
             of milliseconds specified by this config. Specifying `None` will
-            disable idle checks. Default: 540000 (9hours).
+            disable idle checks. Default: 540000 (9 minutes).
     """
 
     def __init__(self, *, loop, bootstrap_servers='localhost',
@@ -159,7 +159,7 @@ class AIOKafkaClient:
             except KafkaError as err:
                 log.warning('Unable to request metadata from "%s:%s": %s',
                             host, port, err)
-                bootstrap_conn.close()
+                bootstrap_conn.close(reason=CloseReason.KAFKA_ERROR)
                 continue
 
             self.cluster.update_metadata(metadata)
@@ -171,7 +171,7 @@ class AIOKafkaClient:
                 bootstrap_id = ('bootstrap', ConnectionGroup.DEFAULT)
                 self._conns[bootstrap_id] = bootstrap_conn
             else:
-                bootstrap_conn.close()
+                bootstrap_conn.close(reason=CloseReason.BOOTSTRAP_DONE)
 
             log.debug('Received cluster metadata: %s', self.cluster)
             break
@@ -269,7 +269,7 @@ class AIOKafkaClient:
             # proper cluster layout is available.
             if bootstrap_id in self._conns and len(self.cluster.brokers()):
                 conn = self._conns.pop(bootstrap_id)
-                conn.close()
+                conn.close(reason=CloseReason.BOOTSTRAP_DONE)
 
             break
         else:
@@ -334,6 +334,7 @@ class AIOKafkaClient:
     def _on_connection_closed(self, conn, reason):
         """ Callback called when connection is closed
         """
+        log.info("Node at %s closed because %s", conn, CloseReason.to_string(reason))
         # Connection failures imply that our metadata is stale, so let's
         # refresh
         if reason == CloseReason.CONNECTION_BROKEN or \
@@ -481,7 +482,7 @@ class AIOKafkaClient:
             else:
                 # To avoid having a connection in undefined state
                 if node_id != "bootstrap" and conn.connected():
-                    conn.close()
+                    conn.close(reason=CloseReason.BOOTSTRAP_DONE)
                 if isinstance(request, ApiVersionRequest_v0):
                     # Starting from 0.10 kafka broker we determine version
                     # by looking at ApiVersionResponse

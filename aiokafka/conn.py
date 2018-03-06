@@ -22,6 +22,32 @@ class CloseReason:
     OUT_OF_SYNC = 2
     IDLE_DROP = 3
     SHUTDOWN = 4
+    API_VERSION_ERROR = 5
+    KAFKA_ERROR = 6
+    BOOTSTRAP_DONE = 7
+
+    @staticmethod
+    def to_string(reason):
+        if reason is None:
+            return "UNKNOWN"
+        elif reason == CloseReason.CONNECTION_BROKEN:
+            return "CONNECTION_BROKEN"
+        elif reason == CloseReason.CONNECTION_TIMEOUT:
+            return "CONNECTION_TIMEOUT"
+        elif reason == CloseReason.OUT_OF_SYNC:
+            return "OUT_OF_SYNC"
+        elif reason == CloseReason.IDLE_DROP:
+            return "IDLE_DROP"
+        elif reason == CloseReason.SHUTDOWN:
+            return "SHUTDOWN"
+        elif reason == CloseReason.API_VERSION_ERROR:
+            return "API_VERSION_ERROR"
+        elif reason == CloseReason.KAFKA_ERROR:
+            return "KAFKA_ERROR"
+        elif reason == CloseReason.BOOTSTRAP_DONE:
+            return "BOOTSTRAP_DONE"
+        else:
+            return "UNKNOWN"
 
 
 @asyncio.coroutine
@@ -122,6 +148,7 @@ class AIOKafkaConnection:
             conn_exc.__context__ = exc
             for _, _, fut in self._requests:
                 fut.set_exception(conn_exc)
+            self.log.warning("%s Connection Broken (_on_read_task_error): %s", self, exc)
             self.close(reason=CloseReason.CONNECTION_BROKEN)
 
     def _idle_check(self):
@@ -130,6 +157,8 @@ class AIOKafkaConnection:
         # If we have any pending requests, we are assumed to be not idle.
         # it's up to `request_timeout_ms` to break those.
         if (idle_for >= timeout) and not self._requests:
+            self.log.warning("%s timing out becaue idle for %f seconds (max idle is %f seconds)",
+                self, idle_for, timeout)
             self.close(CloseReason.IDLE_DROP)
         else:
             if self._requests:
@@ -169,6 +198,7 @@ class AIOKafkaConnection:
         try:
             self._writer.write(size + message)
         except OSError as err:
+            self.log.warning("%s Connection Broken (send): %s", self, err)
             self.close(reason=CloseReason.CONNECTION_BROKEN)
             raise Errors.ConnectionError(
                 "Connection at {0}:{1} broken: {2}".format(
@@ -250,6 +280,7 @@ class AIOKafkaConnection:
             conn_exc.__context__ = exc
             for _, _, fut in self._requests:
                 fut.set_exception(conn_exc)
+            self.log.warning("%s Connection Broken (_read): %s", self, exc)
             self.close(reason=CloseReason.CONNECTION_BROKEN)
         except asyncio.CancelledError:
             pass
