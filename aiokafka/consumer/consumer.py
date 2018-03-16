@@ -221,7 +221,7 @@ class AIOKafkaConsumer(object):
             * Wait for possible topic autocreation
             * Join group if ``group_id`` provided
         """
-        yield from self._client.bootstrap()
+        yield from self._client.bootstrap(topics=[])
         yield from self._wait_topics()
 
         if self._client.api_version < (0, 9):

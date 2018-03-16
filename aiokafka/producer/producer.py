@@ -207,7 +207,7 @@ class AIOKafkaProducer(object):
     def start(self):
         """Connect to Kafka cluster and check server version"""
         log.debug("Starting the Kafka producer")  # trace
-        yield from self.client.bootstrap()
+        yield from self.client.bootstrap(topics=[])
 
         if self._compression_type == 'lz4':
             assert self.client.api_version >= (0, 8, 2), \

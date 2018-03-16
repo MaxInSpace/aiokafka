@@ -136,10 +136,23 @@ class AIOKafkaClient:
             yield from asyncio.gather(*futs, loop=self._loop)
 
     @asyncio.coroutine
-    def bootstrap(self):
-        """Try to to bootstrap initial cluster metadata"""
+    def bootstrap(self, topics=None):
+        """
+        Try to to bootstrap initial cluster metadata
+        Set topics to None for all topics (default)
+        Set topics to an empty list [] for broker metadata only
+        Set topics to a list of topics for data on only those topics
+        """
         # using request v0 for bootstap (bcs api version is not detected yet)
-        metadata_request = MetadataRequest[0]([])
+        # version_id = 0 if self.api_version < (0, 10) else 1
+        if self.api_version < (0, 10):
+            if topics is not None:
+                metadata_request = MetadataRequest[0](topics)
+            else:   # we can't send a None request, so we'll get everything
+                metadata_request = MetadataRequest[0]([])
+        else:
+            metadata_request = MetadataRequest[1](topics)
+
         for host, port, _ in self.hosts:
             log.debug("Attempting to bootstrap via node at %s:%s", host, port)
 
