@@ -136,6 +136,14 @@ class AIOKafkaClient:
             yield from asyncio.gather(*futs, loop=self._loop)
 
     @asyncio.coroutine
+    def add_bootstrap(self, topics):
+        """
+        Add a topic and bootstrap.
+        """
+        self._topics |= set(topics)
+        yield from self.force_metadata_update()
+
+    @asyncio.coroutine
     def bootstrap(self, topics=None):
         """
         Try to to bootstrap initial cluster metadata
@@ -441,6 +449,7 @@ class AIOKafkaClient:
     @asyncio.coroutine
     def check_version(self, node_id=None):
         """Attempt to guess the broker version"""
+        log.info("check_version is hacky at best and should be avoided")
         if node_id is None:
             default_group_conns = [
                 node_id for (node_id, group) in self._conns.keys()

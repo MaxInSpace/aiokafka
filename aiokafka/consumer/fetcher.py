@@ -425,11 +425,12 @@ class Fetcher:
                         # fetch size, in this case record this exception
                         err = RecordTooLargeError(
                             "There are some messages at [Partition=Offset]: "
-                            "%s=%s whose size is larger than the fetch size %s"
+                            "%s=%s whose size %s is larger than the fetch size %s"
                             " and hence cannot be ever returned. "
                             "Increase the fetch size, or decrease the maximum "
-                            "message size the broker will allow.",
-                            tp, fetch_offset, self._max_partition_fetch_bytes)
+                            "message size the broker will allow." %
+                            (tp, fetch_offset, records.size_in_bytes(),
+                            self._max_partition_fetch_bytes))
                         self._set_error(tp, err)
                         needs_wakeup = True
                         self._subscriptions.assignment[tp].position += 1
