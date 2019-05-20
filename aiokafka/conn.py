@@ -129,6 +129,8 @@ class AIOKafkaConnection:
                 lambda: protocol, self.host, self.port, ssl=ssl),
             loop=loop, timeout=self._request_timeout)
         writer = asyncio.StreamWriter(transport, protocol, reader, loop)
+        # 4M low buffer, 16M high buffer
+        writer.transport.set_write_buffer_limits(high=1024 * 1024 * 16, low=1024 * 1024 * 4)
         self._reader, self._writer, self._protocol = reader, writer, protocol
         # Start reader task.
         self._read_task = ensure_future(self._read(), loop=loop)

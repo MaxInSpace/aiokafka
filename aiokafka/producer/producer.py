@@ -247,7 +247,7 @@ class AIOKafkaProducer(object):
 
     @asyncio.coroutine
     def send(self, topic, value=None, key=None, partition=None,
-             timestamp_ms=None):
+             timestamp_ms=None, wait_for_ack=True):
         """Publish a message to a topic.
 
         Arguments:
@@ -270,6 +270,8 @@ class AIOKafkaProducer(object):
                 key_serializer.
             timestamp_ms (int, optional): epoch milliseconds (from Jan 1 1970
                 UTC) to use as the message timestamp. Defaults to current time.
+            wait_for_ack (optional): a flag to indicate that we should wait
+                for an ack from the broker.
 
         Returns:
             asyncio.Future: object that will be set when message is
@@ -304,7 +306,7 @@ class AIOKafkaProducer(object):
 
         fut = yield from self._message_accumulator.add_message(
             tp, key_bytes, value_bytes, self._request_timeout_ms / 1000,
-            timestamp_ms=timestamp_ms)
+            timestamp_ms=timestamp_ms, wait_for_ack=wait_for_ack)
         return fut
 
     @asyncio.coroutine
@@ -391,11 +393,13 @@ class AIOKafkaProducer(object):
         """
         t0 = self._loop.time()
 
+        wait_for_acks = False
         topics = collections.defaultdict(list)
         for tp, batch in batches.items():
             topics[tp.topic].append(
                 (tp.partition, batch.get_data_buffer())
             )
+            wait_for_acks = wait_for_acks or batch.wait_for_ack()
 
         if self.client.api_version >= (0, 10):
             version = 2
@@ -412,7 +416,7 @@ class AIOKafkaProducer(object):
         reenqueue = []
 
         try:
-            response = yield from self.client.send(node_id, request)
+            response = yield from self.client.send(node_id, request, wait_for_response=wait_for_acks)
         except KafkaError as err:
             log.warning(
                 "Got error produce response: %s", err)

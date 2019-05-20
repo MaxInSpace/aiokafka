@@ -405,7 +405,7 @@ class AIOKafkaClient:
         return True
 
     @asyncio.coroutine
-    def send(self, node_id, request, *, group=ConnectionGroup.DEFAULT):
+    def send(self, node_id, request, *, group=ConnectionGroup.DEFAULT, wait_for_response=True):
         """Send a request to a specific node.
 
         Arguments:
@@ -429,7 +429,7 @@ class AIOKafkaClient:
         # Every request gets a response, except one special case:
         expect_response = True
         if isinstance(request, tuple(ProduceRequest)) and \
-                request.required_acks == 0:
+                (request.required_acks == 0 or not wait_for_response):
             expect_response = False
 
         future = self._conns[(node_id, group)].send(
