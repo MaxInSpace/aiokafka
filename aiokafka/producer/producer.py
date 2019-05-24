@@ -401,6 +401,7 @@ class AIOKafkaProducer(object):
             )
             wait_for_acks = wait_for_acks or batch.wait_for_ack()
 
+
         if self.client.api_version >= (0, 10):
             version = 2
         elif self.client.api_version == (0, 9):
@@ -408,8 +409,12 @@ class AIOKafkaProducer(object):
         else:
             version = 0
 
+        acks = self._acks
+        if not wait_for_acks:
+            acks = 0
+
         request = ProduceRequest[version](
-            required_acks=self._acks,
+            required_acks=acks,
             timeout=self._request_timeout_ms,
             topics=list(topics.items()))
 
